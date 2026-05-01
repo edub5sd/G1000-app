@@ -3,13 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>G1000 Open Source Sim</title>
+    <title>G1000 Mission Control</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <style>
         body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; }
-        .cockpit-panel { display: flex; justify-content: center; gap: 20px; padding: 20px; height: 100vh; align-items: center; }
-        .unit-frame { border: 15px solid #222; border-radius: 10px; background: #111; position: relative; }
-        canvas { background: #000; display: block; width: 600px; height: 450px; }
-        .bezel-label { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #222; padding: 0 10px; color: #aaa; font-size: 10px; }
+        .cockpit-panel { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            gap: 20px; 
+            height: 100vh; 
+            padding: 10px;
+        }
+        .unit-frame { 
+            border: 12px solid #222; 
+            border-radius: 8px; 
+            background: #111; 
+            position: relative; 
+            box-shadow: 0 0 30px #000;
+        }
+        canvas, #mfdMap { 
+            display: block; 
+            width: 45vw; 
+            height: 35vw; 
+            background: #000; 
+        }
+        .bezel-label { 
+            position: absolute; top: -10px; left: 50%; transform: translateX(-50%); 
+            background: #222; padding: 0 10px; color: #aaa; font-size: 10px; font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -21,112 +46,81 @@
     </div>
 
     <div class="unit-frame">
-        <span class="bezel-label">GARMIN MFD</span>
-        <canvas id="mfdCanvas"></canvas>
+        <span class="bezel-label">GARMIN MFD / MAP</span>
+        <div id="mfdMap"></div>
     </div>
 </div>
 
 <script>
 /**
- * THE ENGINE (Physics & State)
+ * FLIGHT & TELEMETRY SYSTEM
  */
-class FlightSystem {
-    constructor() {
-        this.pitch = 0;
-        this.roll = 0;
-        this.alt = 5000;
-        this.speed = 120;
-        this.hdg = 360;
-    }
+const state = {
+    pitch: 0, roll: 0, hdg: 0,
+    alt: 0, speed: 0, lat: 34.0522, lon: -118.2437
+};
 
-    update(keys) {
-        if (keys['ArrowUp']) this.pitch -= 0.5;
-        if (keys['ArrowDown']) this.pitch += 0.5;
-        if (keys['ArrowLeft']) this.roll -= 1.0;
-        if (keys['ArrowRight']) this.roll += 1.0;
+// 1. Initialize PFD
+const pCanvas = document.getElementById('pfdCanvas');
+const pctx = pCanvas.getContext('2d');
+pCanvas.width = 600; pCanvas.height = 450;
 
-        // Stabilization
-        this.pitch *= 0.99;
-        this.roll *= 0.98;
+// 2. Initialize MFD Map
+const map = L.map('mfdMap', { zoomControl: false }).setView([state.lat, state.lon], 16);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+let suvMarker = L.circleMarker([state.lat, state.lon], { color: 'cyan', radius: 8 }).addTo(map);
 
-        // Dynamics
-        this.alt -= this.pitch * 0.1;
-        this.speed += this.pitch * 0.05;
-        this.hdg = (this.hdg + (this.roll * 0.05) + 360) % 360;
-    }
+/**
+ * PFD DRAWING LOGIC
+ */
+function drawPFD() {
+    pctx.clearRect(0, 0, 600, 450);
+
+    // Artificial Horizon
+    pctx.save();
+    pctx.translate(300, 225);
+    pctx.rotate(-state.roll * Math.PI / 180);
+    pctx.translate(0, state.pitch * 5);
+    pctx.fillStyle = "#0072bc"; pctx.fillRect(-1000, -1000, 2000, 1000); // Sky
+    pctx.fillStyle = "#734a12"; pctx.fillRect(-1000, 0, 2000, 1000);    // Ground
+    pctx.restore();
+
+    // Altitude & Speed Readouts
+    pctx.fillStyle = "rgba(0,0,0,0.7)";
+    pctx.fillRect(10, 190, 80, 70); // Speed box
+    pctx.fillRect(510, 190, 80, 70); // Alt box
+    
+    pctx.fillStyle = "white"; pctx.font = "bold 20px Arial";
+    pctx.fillText("SPD: " + Math.round(state.speed), 15, 230);
+    pctx.fillText("ALT: " + Math.round(state.alt), 515, 230);
 }
 
 /**
- * THE DISPLAYS
+ * TELEMETRY UPDATER
  */
-class Display {
-    constructor(canvasId) {
-        this.canvas = document.getElementById(canvasId);
-        this.ctx = this.canvas.getContext('2d');
-        this.canvas.width = 600;
-        this.canvas.height = 450;
-    }
+function startGPS() {
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition((pos) => {
+            state.lat = pos.coords.latitude;
+            state.lon = pos.coords.longitude;
+            state.speed = (pos.coords.speed || 0) * 1.94; // M/S to Knots
+            state.alt = (pos.coords.altitude || 0) * 3.28; // Meters to Feet
+            if (pos.coords.heading) state.hdg = pos.coords.heading;
 
-    drawTape(x, val, label) {
-        const c = this.ctx;
-        c.fillStyle = "rgba(40,40,40,0.8)";
-        c.fillRect(x, 50, 60, 350);
-        c.fillStyle = "white";
-        c.font = "bold 16px Arial";
-        c.fillText(Math.round(val), x + 15, 225);
-        c.strokeStyle = "white";
-        c.strokeRect(x, 210, 60, 30);
+            // Sync the Map
+            map.panTo([state.lat, state.lon]);
+            suvMarker.setLatLng([state.lat, state.lon]);
+        }, null, { enableHighAccuracy: true });
     }
 }
 
-class PFD extends Display {
-    render(sim) {
-        const c = this.ctx;
-        c.clearRect(0,0,600,450);
-        
-        // Artificial Horizon
-        c.save();
-        c.translate(300, 225);
-        c.rotate(-sim.roll * Math.PI / 180);
-        c.translate(0, sim.pitch * 5);
-        c.fillStyle = "#0072bc"; c.fillRect(-1000,-1000,2000,1000); // Sky
-        c.fillStyle = "#734a12"; c.fillRect(-1000,0,2000,1000);    // Ground
-        c.restore();
-
-        // Tapes
-        this.drawTape(20, sim.speed, "SPD");
-        this.drawTape(520, sim.alt, "ALT");
-    }
-}
-
-class MFD extends Display {
-    render(sim) {
-        const c = this.ctx;
-        c.fillStyle = "#111";
-        c.fillRect(0,0,600,450);
-        c.fillStyle = "#00FF00";
-        c.textAlign = "center";
-        c.fillText("ENGINE STATUS: NORM", 300, 100);
-        c.fillText("MAP MODE: NORTH UP", 300, 200);
-    }
-}
-
-// Initialization
-const sim = new FlightSystem();
-const pfd = new PFD('pfdCanvas');
-const mfd = new MFD('mfdCanvas');
-const keys = {};
-
-window.onkeydown = (e) => keys[e.code] = true;
-window.onkeyup = (e) => keys[e.code] = false;
-
+// Main Animation Loop
 function mainLoop() {
-    sim.update(keys);
-    pfd.render(sim);
-    mfd.render(sim);
+    drawPFD();
     requestAnimationFrame(mainLoop);
 }
 
+startGPS();
 mainLoop();
 </script>
 </body>
