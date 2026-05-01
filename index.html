@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G1000 Open Source Sim</title>
+    <style>
+        body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; }
+        .cockpit-panel { display: flex; justify-content: center; gap: 20px; padding: 20px; height: 100vh; align-items: center; }
+        .unit-frame { border: 15px solid #222; border-radius: 10px; background: #111; position: relative; }
+        canvas { background: #000; display: block; width: 600px; height: 450px; }
+        .bezel-label { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: #222; padding: 0 10px; color: #aaa; font-size: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="cockpit-panel">
+    <div class="unit-frame">
+        <span class="bezel-label">GARMIN PFD</span>
+        <canvas id="pfdCanvas"></canvas>
+    </div>
+
+    <div class="unit-frame">
+        <span class="bezel-label">GARMIN MFD</span>
+        <canvas id="mfdCanvas"></canvas>
+    </div>
+</div>
+
+<script>
+/**
+ * THE ENGINE (Physics & State)
+ */
+class FlightSystem {
+    constructor() {
+        this.pitch = 0;
+        this.roll = 0;
+        this.alt = 5000;
+        this.speed = 120;
+        this.hdg = 360;
+    }
+
+    update(keys) {
+        if (keys['ArrowUp']) this.pitch -= 0.5;
+        if (keys['ArrowDown']) this.pitch += 0.5;
+        if (keys['ArrowLeft']) this.roll -= 1.0;
+        if (keys['ArrowRight']) this.roll += 1.0;
+
+        // Stabilization
+        this.pitch *= 0.99;
+        this.roll *= 0.98;
+
+        // Dynamics
+        this.alt -= this.pitch * 0.1;
+        this.speed += this.pitch * 0.05;
+        this.hdg = (this.hdg + (this.roll * 0.05) + 360) % 360;
+    }
+}
+
+/**
+ * THE DISPLAYS
+ */
+class Display {
+    constructor(canvasId) {
+        this.canvas = document.getElementById(canvasId);
+        this.ctx = this.canvas.getContext('2d');
+        this.canvas.width = 600;
+        this.canvas.height = 450;
+    }
+
+    drawTape(x, val, label) {
+        const c = this.ctx;
+        c.fillStyle = "rgba(40,40,40,0.8)";
+        c.fillRect(x, 50, 60, 350);
+        c.fillStyle = "white";
+        c.font = "bold 16px Arial";
+        c.fillText(Math.round(val), x + 15, 225);
+        c.strokeStyle = "white";
+        c.strokeRect(x, 210, 60, 30);
+    }
+}
+
+class PFD extends Display {
+    render(sim) {
+        const c = this.ctx;
+        c.clearRect(0,0,600,450);
+        
+        // Artificial Horizon
+        c.save();
+        c.translate(300, 225);
+        c.rotate(-sim.roll * Math.PI / 180);
+        c.translate(0, sim.pitch * 5);
+        c.fillStyle = "#0072bc"; c.fillRect(-1000,-1000,2000,1000); // Sky
+        c.fillStyle = "#734a12"; c.fillRect(-1000,0,2000,1000);    // Ground
+        c.restore();
+
+        // Tapes
+        this.drawTape(20, sim.speed, "SPD");
+        this.drawTape(520, sim.alt, "ALT");
+    }
+}
+
+class MFD extends Display {
+    render(sim) {
+        const c = this.ctx;
+        c.fillStyle = "#111";
+        c.fillRect(0,0,600,450);
+        c.fillStyle = "#00FF00";
+        c.textAlign = "center";
+        c.fillText("ENGINE STATUS: NORM", 300, 100);
+        c.fillText("MAP MODE: NORTH UP", 300, 200);
+    }
+}
+
+// Initialization
+const sim = new FlightSystem();
+const pfd = new PFD('pfdCanvas');
+const mfd = new MFD('mfdCanvas');
+const keys = {};
+
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+
+function mainLoop() {
+    sim.update(keys);
+    pfd.render(sim);
+    mfd.render(sim);
+    requestAnimationFrame(mainLoop);
+}
+
+mainLoop();
+</script>
+</body>
+</html>
