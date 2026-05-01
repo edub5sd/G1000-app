@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>G1000 Mission Control</title>
+    <title>G1000 NXi Simulator</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.0.0/dist/geosearch.css" />
@@ -11,73 +11,77 @@
     <script src="https://unpkg.com/leaflet-geosearch@3.0.0/dist/bundle.min.js"></script>
 
     <style>
-        body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; background: #000; color: #fff; font-family: 'Arial', sans-serif; overflow: hidden; }
         
-        /* Layout */
-        .cockpit-panel { display: flex; justify-content: center; align-items: center; gap: 15px; height: 100vh; padding: 10px; }
-        .unit-frame { border: 12px solid #222; border-radius: 8px; background: #111; position: relative; box-shadow: 0 0 30px #000; }
-        canvas, #mfdMap { display: block; width: 45vw; height: 35vw; background: #000; }
+        .cockpit { display: flex; justify-content: center; align-items: center; gap: 10px; height: 100vh; padding: 10px; }
         
-        /* Search Bar Styles */
-        #search-container { position: absolute; top: 15px; right: 10%; z-index: 1000; display: flex; box-shadow: 0 0 15px rgba(0,255,0,0.3); }
-        #search-input { padding: 10px; border: none; border-radius: 5px 0 0 5px; width: 200px; font-size: 14px; }
-        #search-btn { padding: 10px; background: #0072bc; color: white; border: none; border-radius: 0 5px 5px 0; cursor: pointer; font-weight: bold; }
+        /* The Bezel Frames */
+        .bezel { 
+            border: 15px solid #1a1a1a; 
+            border-radius: 10px; 
+            background: #000; 
+            position: relative; 
+            box-shadow: inset 0 0 10px #000, 0 0 20px #222;
+        }
 
-        /* System Buttons */
-        #gps-btn { position: absolute; bottom: 20px; left: 20px; z-index: 1000; padding: 12px 20px; background: #ff0000; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
-        .active { background: #00ff00 !important; color: #000 !important; }
-        
-        .bezel-text { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); color: #666; font-size: 10px; font-weight: bold; }
+        canvas, #map { display: block; width: 47vw; height: 38vw; background: #000; }
+
+        /* Modern Search Bar */
+        #search-container {
+            position: absolute; top: 10px; left: 10px; z-index: 1000;
+            display: flex; background: rgba(0,0,0,0.8); padding: 5px; border-radius: 5px; border: 1px solid #444;
+        }
+        #search-input { background: #000; color: #0f0; border: 1px solid #333; padding: 8px; width: 200px; outline: none; }
+        #search-btn { background: #222; color: white; border: 1px solid #444; padding: 8px 15px; cursor: pointer; margin-left: 5px; }
+
+        /* Systems Button */
+        #master-btn { 
+            position: absolute; bottom: 20px; left: 20px; z-index: 1000; 
+            padding: 15px; background: #b00; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;
+        }
+        .online { background: #006400 !important; }
+
+        .label { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #555; background: #1a1a1a; padding: 0 5px; }
     </style>
 </head>
 <body>
 
-<div id="search-container">
-    <input type="text" id="search-input" placeholder="Enter Destination...">
-    <button id="search-btn" onclick="executeSearch()">NAV</button>
-</div>
+<button id="master-btn" onclick="engageSensors()">MASTER POWER: OFF</button>
 
-<button id="gps-btn" onclick="activateSystems()">ENGAGE SENSORS</button>
-
-<div class="cockpit-panel">
-    <div class="unit-frame">
+<div class="cockpit">
+    <div class="bezel">
+        <span class="label">GARMIN PFD</span>
         <canvas id="pfdCanvas"></canvas>
-        <div class="bezel-text">GDU 1040 PFD</div>
     </div>
 
-    <div class="unit-frame">
-        <div id="mfdMap"></div>
-        <div class="bezel-text">GDU 1040 MFD</div>
+    <div class="bezel">
+        <span class="label">GARMIN MFD</span>
+        <div id="search-container">
+            <input type="text" id="search-input" placeholder="SEARCH WAYPOINT...">
+            <button id="search-btn" onclick="findLocation()">ENT</button>
+        </div>
+        <div id="map"></div>
     </div>
 </div>
 
 <script>
-/**
- * GLOBAL SYSTEM STATE
- */
-const state = {
-    pitch: 0, roll: 0, 
-    hdg: 0, alt: 0, speed: 0,
-    lat: 0, lon: 0
-};
+const sim = { pitch: 0, roll: 0, hdg: 0, alt: 0, spd: 0, lat: 34.1, lon: -118.2 };
 
-// 1. PFD INITIALIZATION
-const canvas = document.getElementById('pfdCanvas');
-const ctx = canvas.getContext('2d');
-canvas.width = 600; canvas.height = 450;
+// PFD Setup
+const pCanvas = document.getElementById('pfdCanvas');
+const pctx = pCanvas.getContext('2d');
+pCanvas.width = 800; pCanvas.height = 600;
 
-// 2. MFD MAP INITIALIZATION
-const map = L.map('mfdMap', { zoomControl: false }).setView([0, 0], 2);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-let suvIcon = L.circleMarker([0, 0], { color: 'cyan', radius: 8, fillOpacity: 1 }).addTo(map);
+// MFD Map Setup (Using a "LIT" vivid style)
+const map = L.map('map', { zoomControl: false }).setView([sim.lat, sim.lon], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png').addTo(map); // High contrast "LIT" map
+let suv = L.circleMarker([0,0], { color: '#00ffff', radius: 10, fillOpacity: 1 }).addTo(map);
 
-/**
- * SEARCH ENGINE (GEO-SEARCH)
- */
-const searchProvider = new GeoSearch.OpenStreetMapProvider();
-async function executeSearch() {
+// Search Engine
+const provider = new GeoSearch.OpenStreetMapProvider();
+async function findLocation() {
     const query = document.getElementById('search-input').value;
-    const results = await searchProvider.search({ query: query });
+    const results = await provider.search({ query: query });
     if (results.length > 0) {
         const { x, y, label } = results[0];
         L.marker([y, x]).addTo(map).bindPopup(label).openPopup();
@@ -85,60 +89,74 @@ async function executeSearch() {
     }
 }
 
-/**
- * PFD RENDERING ENGINE
- */
 function drawPFD() {
-    ctx.clearRect(0, 0, 600, 450);
+    pctx.clearRect(0, 0, 800, 600);
 
-    // Artificial Horizon with Roll and Pitch
-    ctx.save();
-    ctx.translate(300, 225);
-    ctx.rotate(-state.roll * Math.PI / 180);
-    ctx.translate(0, state.pitch * 5);
+    // 1. Horizon & Pitch Ladder
+    pctx.save();
+    pctx.translate(400, 300);
+    pctx.rotate(-sim.roll * Math.PI / 180);
+    pctx.translate(0, sim.pitch * 8);
+
+    pctx.fillStyle = "#0072bc"; pctx.fillRect(-1500, -1500, 3000, 1500); // Sky
+    pctx.fillStyle = "#734a12"; pctx.fillRect(-1500, 0, 3000, 1500);    // Ground
     
-    // Sky
-    ctx.fillStyle = "#0072bc"; ctx.fillRect(-1200, -1200, 2400, 1200);
-    // Ground
-    ctx.fillStyle = "#734a12"; ctx.fillRect(-1200, 0, 2400, 1200);
-    
-    // Pitch Ladder tick marks
-    ctx.strokeStyle = "white"; ctx.lineWidth = 2;
+    // Pitch Ladder
+    pctx.strokeStyle = "white"; pctx.lineWidth = 2;
     for(let i = -30; i <= 30; i += 5) {
-        let y = -i * 10;
-        ctx.beginPath();
-        ctx.moveTo(i % 10 === 0 ? -40 : -20, y);
-        ctx.lineTo(i % 10 === 0 ? 40 : 20, y);
-        ctx.stroke();
+        let y = -i * 15;
+        pctx.beginPath();
+        pctx.moveTo(i%10===0 ? -60 : -30, y);
+        pctx.lineTo(i%10===0 ? 60 : 30, y);
+        pctx.stroke();
     }
-    ctx.restore();
+    pctx.restore();
 
-    // Airspeed Tape (Left)
-    ctx.fillStyle = "rgba(40,40,40,0.8)"; ctx.fillRect(10, 50, 70, 350);
-    ctx.fillStyle = "white"; ctx.font = "bold 20px Monospace";
-    ctx.fillText(Math.round(state.speed), 25, 230);
-    ctx.strokeStyle = "white"; ctx.strokeRect(10, 210, 70, 30);
+    // 2. Airspeed Tape
+    pctx.fillStyle = "rgba(0,0,0,0.6)"; pctx.fillRect(50, 100, 80, 400);
+    pctx.fillStyle = "white"; pctx.font = "bold 24px Arial";
+    pctx.fillText(Math.round(sim.spd), 70, 310);
+    pctx.strokeStyle = "white"; pctx.strokeRect(50, 285, 80, 40);
 
-    // Altimeter Tape (Right)
-    ctx.fillStyle = "rgba(40,40,40,0.8)"; ctx.fillRect(520, 50, 70, 350);
-    ctx.fillStyle = "white";
-    ctx.fillText(Math.round(state.alt), 525, 230);
-    ctx.strokeStyle = "white"; ctx.strokeRect(520, 210, 70, 30);
+    // 3. Altimeter Tape
+    pctx.fillStyle = "rgba(0,0,0,0.6)"; pctx.fillRect(670, 100, 80, 400);
+    pctx.fillText(Math.round(sim.alt), 680, 310);
+    pctx.strokeStyle = "white"; pctx.strokeRect(670, 285, 80, 40);
+
+    // 4. HSI (Compass)
+    pctx.save();
+    pctx.translate(400, 520);
+    pctx.rotate(-sim.hdg * Math.PI / 180);
+    pctx.strokeStyle = "white"; pctx.lineWidth = 3;
+    pctx.beginPath(); pctx.arc(0, 0, 60, 0, Math.PI*2); pctx.stroke();
+    pctx.fillStyle = "white"; pctx.font = "14px Arial";
+    pctx.fillText("N", -5, -65); pctx.fillText("E", 65, 5); pctx.fillText("S", -5, 75); pctx.fillText("W", -75, 5);
+    pctx.restore();
 }
 
-/**
- * TELEMETRY & SENSOR LINK
- */
-function activateSystems() {
-    const btn = document.getElementById('gps-btn');
-    btn.innerText = "SYSTEMS ONLINE";
-    btn.classList.add('active');
+function engageSensors() {
+    const btn = document.getElementById('master-btn');
+    btn.innerText = "MASTER POWER: ON";
+    btn.classList.add('online');
 
-    // Start GPS
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition((pos) => {
-            state.lat = pos.coords.latitude;
-            state.lon = pos.coords.longitude;
+            sim.lat = pos.coords.latitude; sim.lon = pos.coords.longitude;
+            sim.spd = (pos.coords.speed || 0) * 1.94;
+            sim.alt = (pos.coords.altitude || 0) * 3.28;
+            if(pos.coords.heading) sim.hdg = pos.coords.heading;
+            
+            map.panTo([sim.lat, sim.lon]);
+            suv.setLatLng([sim.lat, sim.lon]);
+        }, null, { enableHighAccuracy: true });
+    }
+}
+
+function loop() { drawPFD(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>            state.lon = pos.coords.longitude;
             state.speed = (pos.coords.speed || 0) * 1.94;
             state.alt = (pos.coords.altitude || 0) * 3.28;
             
