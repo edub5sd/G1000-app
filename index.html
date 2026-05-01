@@ -2,125 +2,164 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>G1000 Mission Control</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-geosearch@3.0.0/dist/geosearch.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-geosearch@3.0.0/dist/bundle.min.js"></script>
 
     <style>
         body { margin: 0; background: #050505; color: #fff; font-family: sans-serif; overflow: hidden; }
-        .cockpit-panel { 
-            display: flex; 
-            justify-content: center; 
-            align-items: center; 
-            gap: 20px; 
-            height: 100vh; 
-            padding: 10px;
-        }
-        .unit-frame { 
-            border: 12px solid #222; 
-            border-radius: 8px; 
-            background: #111; 
-            position: relative; 
-            box-shadow: 0 0 30px #000;
-        }
-        canvas, #mfdMap { 
-            display: block; 
-            width: 45vw; 
-            height: 35vw; 
-            background: #000; 
-        }
-        .bezel-label { 
-            position: absolute; top: -10px; left: 50%; transform: translateX(-50%); 
-            background: #222; padding: 0 10px; color: #aaa; font-size: 10px; font-weight: bold;
-        }
+        
+        /* Layout */
+        .cockpit-panel { display: flex; justify-content: center; align-items: center; gap: 15px; height: 100vh; padding: 10px; }
+        .unit-frame { border: 12px solid #222; border-radius: 8px; background: #111; position: relative; box-shadow: 0 0 30px #000; }
+        canvas, #mfdMap { display: block; width: 45vw; height: 35vw; background: #000; }
+        
+        /* Search Bar Styles */
+        #search-container { position: absolute; top: 15px; right: 10%; z-index: 1000; display: flex; box-shadow: 0 0 15px rgba(0,255,0,0.3); }
+        #search-input { padding: 10px; border: none; border-radius: 5px 0 0 5px; width: 200px; font-size: 14px; }
+        #search-btn { padding: 10px; background: #0072bc; color: white; border: none; border-radius: 0 5px 5px 0; cursor: pointer; font-weight: bold; }
+
+        /* System Buttons */
+        #gps-btn { position: absolute; bottom: 20px; left: 20px; z-index: 1000; padding: 12px 20px; background: #ff0000; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; }
+        .active { background: #00ff00 !important; color: #000 !important; }
+        
+        .bezel-text { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); color: #666; font-size: 10px; font-weight: bold; }
     </style>
 </head>
 <body>
 
+<div id="search-container">
+    <input type="text" id="search-input" placeholder="Enter Destination...">
+    <button id="search-btn" onclick="executeSearch()">NAV</button>
+</div>
+
+<button id="gps-btn" onclick="activateSystems()">ENGAGE SENSORS</button>
+
 <div class="cockpit-panel">
     <div class="unit-frame">
-        <span class="bezel-label">GARMIN PFD</span>
         <canvas id="pfdCanvas"></canvas>
+        <div class="bezel-text">GDU 1040 PFD</div>
     </div>
 
     <div class="unit-frame">
-        <span class="bezel-label">GARMIN MFD / MAP</span>
         <div id="mfdMap"></div>
+        <div class="bezel-text">GDU 1040 MFD</div>
     </div>
 </div>
 
 <script>
 /**
- * FLIGHT & TELEMETRY SYSTEM
+ * GLOBAL SYSTEM STATE
  */
 const state = {
-    pitch: 0, roll: 0, hdg: 0,
-    alt: 0, speed: 0, lat: 34.0522, lon: -118.2437
+    pitch: 0, roll: 0, 
+    hdg: 0, alt: 0, speed: 0,
+    lat: 0, lon: 0
 };
 
-// 1. Initialize PFD
-const pCanvas = document.getElementById('pfdCanvas');
-const pctx = pCanvas.getContext('2d');
-pCanvas.width = 600; pCanvas.height = 450;
+// 1. PFD INITIALIZATION
+const canvas = document.getElementById('pfdCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = 600; canvas.height = 450;
 
-// 2. Initialize MFD Map
-const map = L.map('mfdMap', { zoomControl: false }).setView([state.lat, state.lon], 16);
+// 2. MFD MAP INITIALIZATION
+const map = L.map('mfdMap', { zoomControl: false }).setView([0, 0], 2);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
-let suvMarker = L.circleMarker([state.lat, state.lon], { color: 'cyan', radius: 8 }).addTo(map);
+let suvIcon = L.circleMarker([0, 0], { color: 'cyan', radius: 8, fillOpacity: 1 }).addTo(map);
 
 /**
- * PFD DRAWING LOGIC
+ * SEARCH ENGINE (GEO-SEARCH)
  */
-function drawPFD() {
-    pctx.clearRect(0, 0, 600, 450);
-
-    // Artificial Horizon
-    pctx.save();
-    pctx.translate(300, 225);
-    pctx.rotate(-state.roll * Math.PI / 180);
-    pctx.translate(0, state.pitch * 5);
-    pctx.fillStyle = "#0072bc"; pctx.fillRect(-1000, -1000, 2000, 1000); // Sky
-    pctx.fillStyle = "#734a12"; pctx.fillRect(-1000, 0, 2000, 1000);    // Ground
-    pctx.restore();
-
-    // Altitude & Speed Readouts
-    pctx.fillStyle = "rgba(0,0,0,0.7)";
-    pctx.fillRect(10, 190, 80, 70); // Speed box
-    pctx.fillRect(510, 190, 80, 70); // Alt box
-    
-    pctx.fillStyle = "white"; pctx.font = "bold 20px Arial";
-    pctx.fillText("SPD: " + Math.round(state.speed), 15, 230);
-    pctx.fillText("ALT: " + Math.round(state.alt), 515, 230);
-}
-
-/**
- * TELEMETRY UPDATER
- */
-function startGPS() {
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition((pos) => {
-            state.lat = pos.coords.latitude;
-            state.lon = pos.coords.longitude;
-            state.speed = (pos.coords.speed || 0) * 1.94; // M/S to Knots
-            state.alt = (pos.coords.altitude || 0) * 3.28; // Meters to Feet
-            if (pos.coords.heading) state.hdg = pos.coords.heading;
-
-            // Sync the Map
-            map.panTo([state.lat, state.lon]);
-            suvMarker.setLatLng([state.lat, state.lon]);
-        }, null, { enableHighAccuracy: true });
+const searchProvider = new GeoSearch.OpenStreetMapProvider();
+async function executeSearch() {
+    const query = document.getElementById('search-input').value;
+    const results = await searchProvider.search({ query: query });
+    if (results.length > 0) {
+        const { x, y, label } = results[0];
+        L.marker([y, x]).addTo(map).bindPopup(label).openPopup();
+        map.flyTo([y, x], 15);
     }
 }
 
-// Main Animation Loop
+/**
+ * PFD RENDERING ENGINE
+ */
+function drawPFD() {
+    ctx.clearRect(0, 0, 600, 450);
+
+    // Artificial Horizon with Roll and Pitch
+    ctx.save();
+    ctx.translate(300, 225);
+    ctx.rotate(-state.roll * Math.PI / 180);
+    ctx.translate(0, state.pitch * 5);
+    
+    // Sky
+    ctx.fillStyle = "#0072bc"; ctx.fillRect(-1200, -1200, 2400, 1200);
+    // Ground
+    ctx.fillStyle = "#734a12"; ctx.fillRect(-1200, 0, 2400, 1200);
+    
+    // Pitch Ladder tick marks
+    ctx.strokeStyle = "white"; ctx.lineWidth = 2;
+    for(let i = -30; i <= 30; i += 5) {
+        let y = -i * 10;
+        ctx.beginPath();
+        ctx.moveTo(i % 10 === 0 ? -40 : -20, y);
+        ctx.lineTo(i % 10 === 0 ? 40 : 20, y);
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // Airspeed Tape (Left)
+    ctx.fillStyle = "rgba(40,40,40,0.8)"; ctx.fillRect(10, 50, 70, 350);
+    ctx.fillStyle = "white"; ctx.font = "bold 20px Monospace";
+    ctx.fillText(Math.round(state.speed), 25, 230);
+    ctx.strokeStyle = "white"; ctx.strokeRect(10, 210, 70, 30);
+
+    // Altimeter Tape (Right)
+    ctx.fillStyle = "rgba(40,40,40,0.8)"; ctx.fillRect(520, 50, 70, 350);
+    ctx.fillStyle = "white";
+    ctx.fillText(Math.round(state.alt), 525, 230);
+    ctx.strokeStyle = "white"; ctx.strokeRect(520, 210, 70, 30);
+}
+
+/**
+ * TELEMETRY & SENSOR LINK
+ */
+function activateSystems() {
+    const btn = document.getElementById('gps-btn');
+    btn.innerText = "SYSTEMS ONLINE";
+    btn.classList.add('active');
+
+    // Start GPS
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition((pos) => {
+            state.lat = pos.coords.latitude;
+            state.lon = pos.coords.longitude;
+            state.speed = (pos.coords.speed || 0) * 1.94;
+            state.alt = (pos.coords.altitude || 0) * 3.28;
+            
+            map.panTo([state.lat, state.lon]);
+            suvIcon.setLatLng([state.lat, state.lon]);
+        }, null, { enableHighAccuracy: true });
+    }
+
+    // Start Gyroscope for the PFD Horizon
+    if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', (e) => {
+            state.roll = e.gamma; // Left/Right tilt
+            state.pitch = e.beta - 45; // Forward/Back tilt (adjusted for viewing angle)
+        });
+    }
+}
+
 function mainLoop() {
     drawPFD();
     requestAnimationFrame(mainLoop);
 }
-
-startGPS();
 mainLoop();
 </script>
 </body>
