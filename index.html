@@ -11,51 +11,29 @@
     <script src="https://unpkg.com/leaflet-geosearch@3.0.0/dist/bundle.min.js"></script>
 
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: 'Arial', sans-serif; overflow: hidden; }
-        
+        body { margin: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; }
         .cockpit { display: flex; justify-content: center; align-items: center; gap: 10px; height: 100vh; padding: 10px; }
+        .bezel { border: 15px solid #1a1a1a; border-radius: 10px; background: #000; position: relative; box-shadow: 0 0 20px #222; }
+        canvas, #map { display: block; width: 47vw; height: 38vw; background: #111; }
         
-        /* The Bezel Frames */
-        .bezel { 
-            border: 15px solid #1a1a1a; 
-            border-radius: 10px; 
-            background: #000; 
-            position: relative; 
-            box-shadow: inset 0 0 10px #000, 0 0 20px #222;
-        }
+        /* Search Bar */
+        #search-container { position: absolute; top: 10px; left: 10px; z-index: 1000; display: flex; background: #000; padding: 5px; border: 1px solid #0f0; border-radius: 5px; }
+        #search-input { background: #000; color: #0f0; border: none; padding: 8px; width: 180px; outline: none; font-family: monospace; }
+        #search-btn { background: #0f0; color: #000; border: none; padding: 8px 12px; cursor: pointer; font-weight: bold; }
 
-        canvas, #map { display: block; width: 47vw; height: 38vw; background: #000; }
-
-        /* Modern Search Bar */
-        #search-container {
-            position: absolute; top: 10px; left: 10px; z-index: 1000;
-            display: flex; background: rgba(0,0,0,0.8); padding: 5px; border-radius: 5px; border: 1px solid #444;
-        }
-        #search-input { background: #000; color: #0f0; border: 1px solid #333; padding: 8px; width: 200px; outline: none; }
-        #search-btn { background: #222; color: white; border: 1px solid #444; padding: 8px 15px; cursor: pointer; margin-left: 5px; }
-
-        /* Systems Button */
-        #master-btn { 
-            position: absolute; bottom: 20px; left: 20px; z-index: 1000; 
-            padding: 15px; background: #b00; color: white; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;
-        }
+        #master-btn { position: absolute; bottom: 20px; left: 20px; z-index: 1000; padding: 15px; background: #b00; color: white; border: none; border-radius: 5px; font-weight: bold; }
         .online { background: #006400 !important; }
-
-        .label { position: absolute; top: -12px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #555; background: #1a1a1a; padding: 0 5px; }
     </style>
 </head>
 <body>
 
-<button id="master-btn" onclick="engageSensors()">MASTER POWER: OFF</button>
+<button id="master-btn" onclick="engageSystems()">ENGAGE SYSTEMS</button>
 
 <div class="cockpit">
     <div class="bezel">
-        <span class="label">GARMIN PFD</span>
         <canvas id="pfdCanvas"></canvas>
     </div>
-
     <div class="bezel">
-        <span class="label">GARMIN MFD</span>
         <div id="search-container">
             <input type="text" id="search-input" placeholder="SEARCH WAYPOINT...">
             <button id="search-btn" onclick="findLocation()">ENT</button>
@@ -65,38 +43,44 @@
 </div>
 
 <script>
-const sim = { pitch: 0, roll: 0, hdg: 0, alt: 0, spd: 0, lat: 34.1, lon: -118.2 };
+const sim = { pitch: 0, roll: 0, hdg: 0, alt: 0, spd: 0, lat: 34.05, lon: -118.24 };
 
 // PFD Setup
 const pCanvas = document.getElementById('pfdCanvas');
 const pctx = pCanvas.getContext('2d');
 pCanvas.width = 800; pCanvas.height = 600;
 
-// MFD Map Setup (Using a "LIT" vivid style)
+// MFD Map Setup
 const map = L.map('map', { zoomControl: false }).setView([sim.lat, sim.lon], 15);
-L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png').addTo(map); // High contrast "LIT" map
-let suv = L.circleMarker([0,0], { color: '#00ffff', radius: 10, fillOpacity: 1 }).addTo(map);
+L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png').addTo(map);
+let suv = L.circleMarker([sim.lat, sim.lon], { color: '#00ffff', radius: 10, fillOpacity: 1 }).addTo(map);
 
-// Search Engine
+// FIX: Search Function
 const provider = new GeoSearch.OpenStreetMapProvider();
 async function findLocation() {
     const query = document.getElementById('search-input').value;
-    const results = await provider.search({ query: query });
-    if (results.length > 0) {
-        const { x, y, label } = results[0];
-        L.marker([y, x]).addTo(map).bindPopup(label).openPopup();
-        map.flyTo([y, x], 15);
+    try {
+        const results = await provider.search({ query: query });
+        if (results && results.length > 0) {
+            const { x, y, label } = results[0];
+            L.marker([y, x]).addTo(map).bindPopup(label).openPopup();
+            map.flyTo([y, x], 16);
+        } else {
+            alert("Waypoint not found!");
+        }
+    } catch (e) {
+        console.error(e);
     }
 }
 
 function drawPFD() {
     pctx.clearRect(0, 0, 800, 600);
 
-    // 1. Horizon & Pitch Ladder
+    // Artificial Horizon
     pctx.save();
     pctx.translate(400, 300);
-    pctx.rotate(-sim.roll * Math.PI / 180);
-    pctx.translate(0, sim.pitch * 8);
+    pctx.rotate(-(sim.roll || 0) * Math.PI / 180);
+    pctx.translate(0, (sim.pitch || 0) * 8);
 
     pctx.fillStyle = "#0072bc"; pctx.fillRect(-1500, -1500, 3000, 1500); // Sky
     pctx.fillStyle = "#734a12"; pctx.fillRect(-1500, 0, 3000, 1500);    // Ground
@@ -112,73 +96,55 @@ function drawPFD() {
     }
     pctx.restore();
 
-    // 2. Airspeed Tape
-    pctx.fillStyle = "rgba(0,0,0,0.6)"; pctx.fillRect(50, 100, 80, 400);
+    // HUD Tapes
+    pctx.fillStyle = "rgba(0,0,0,0.6)"; 
+    pctx.fillRect(50, 100, 90, 400); // Speed
+    pctx.fillRect(660, 100, 90, 400); // Alt
+    
     pctx.fillStyle = "white"; pctx.font = "bold 24px Arial";
+    pctx.fillText("SPD", 65, 130);
     pctx.fillText(Math.round(sim.spd), 70, 310);
-    pctx.strokeStyle = "white"; pctx.strokeRect(50, 285, 80, 40);
-
-    // 3. Altimeter Tape
-    pctx.fillStyle = "rgba(0,0,0,0.6)"; pctx.fillRect(670, 100, 80, 400);
+    pctx.fillText("ALT", 675, 130);
     pctx.fillText(Math.round(sim.alt), 680, 310);
-    pctx.strokeStyle = "white"; pctx.strokeRect(670, 285, 80, 40);
-
-    // 4. HSI (Compass)
-    pctx.save();
-    pctx.translate(400, 520);
-    pctx.rotate(-sim.hdg * Math.PI / 180);
-    pctx.strokeStyle = "white"; pctx.lineWidth = 3;
-    pctx.beginPath(); pctx.arc(0, 0, 60, 0, Math.PI*2); pctx.stroke();
-    pctx.fillStyle = "white"; pctx.font = "14px Arial";
-    pctx.fillText("N", -5, -65); pctx.fillText("E", 65, 5); pctx.fillText("S", -5, 75); pctx.fillText("W", -75, 5);
-    pctx.restore();
 }
 
-function engageSensors() {
+// FIX: Systems Engagement
+function engageSystems() {
     const btn = document.getElementById('master-btn');
-    btn.innerText = "MASTER POWER: ON";
+    btn.innerText = "SYSTEMS ONLINE";
     btn.classList.add('online');
 
+    // Request GPS
     if (navigator.geolocation) {
         navigator.geolocation.watchPosition((pos) => {
-            sim.lat = pos.coords.latitude; sim.lon = pos.coords.longitude;
+            sim.lat = pos.coords.latitude; 
+            sim.lon = pos.coords.longitude;
             sim.spd = (pos.coords.speed || 0) * 1.94;
             sim.alt = (pos.coords.altitude || 0) * 3.28;
             if(pos.coords.heading) sim.hdg = pos.coords.heading;
             
-            map.panTo([sim.lat, sim.lon]);
             suv.setLatLng([sim.lat, sim.lon]);
-        }, null, { enableHighAccuracy: true });
+            map.panTo([sim.lat, sim.lon]);
+        }, (err) => console.log(err), { enableHighAccuracy: true });
     }
+
+    // Request Orientation (PFD Movement)
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(state => {
+            if (state === 'granted') window.addEventListener('deviceorientation', handleOrient);
+        });
+    } else {
+        window.addEventListener('deviceorientation', handleOrient);
+    }
+}
+
+function handleOrient(e) {
+    sim.roll = e.gamma;
+    sim.pitch = e.beta - 45;
 }
 
 function loop() { drawPFD(); requestAnimationFrame(loop); }
 loop();
-</script>
-</body>
-</html>            state.lon = pos.coords.longitude;
-            state.speed = (pos.coords.speed || 0) * 1.94;
-            state.alt = (pos.coords.altitude || 0) * 3.28;
-            
-            map.panTo([state.lat, state.lon]);
-            suvIcon.setLatLng([state.lat, state.lon]);
-        }, null, { enableHighAccuracy: true });
-    }
-
-    // Start Gyroscope for the PFD Horizon
-    if (window.DeviceOrientationEvent) {
-        window.addEventListener('deviceorientation', (e) => {
-            state.roll = e.gamma; // Left/Right tilt
-            state.pitch = e.beta - 45; // Forward/Back tilt (adjusted for viewing angle)
-        });
-    }
-}
-
-function mainLoop() {
-    drawPFD();
-    requestAnimationFrame(mainLoop);
-}
-mainLoop();
 </script>
 </body>
 </html>
